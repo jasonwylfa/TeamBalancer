@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Squad Equalizer">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0f172a">
+    <title>Squad Equalizer</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', 'San Francisco', 'Helvetica Neue', 'Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Google Identity Services (for Google Drive Sync) -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <style>
+        .glass {
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+        .dark .glass {
+            background: rgba(30, 41, 59, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+    </style>
+</head>
+<body class="min-h-screen md:h-screen w-screen bg-slate-200 dark:bg-slate-950 flex items-center justify-center p-0 sm:p-6 overflow-x-hidden md:overflow-hidden">
+
+    <div id="app" class="w-full max-w-6xl min-h-screen md:h-full md:max-h-[900px] flex flex-col bg-slate-100 dark:bg-slate-900 sm:rounded-2xl shadow-2xl border-0 sm:border border-slate-300/50 dark:border-slate-800/60 overflow-hidden font-sans text-slate-800 dark:text-slate-100 transition-colors">
+        
+        <!-- Window / App Titlebar -->
+        <div class="h-12 md:h-10 bg-slate-200/80 dark:bg-slate-800/80 border-b border-slate-300 dark:border-slate-700/60 flex items-center justify-between px-4 select-none sticky top-0 z-30">
+            <div class="hidden md:flex items-center space-x-2">
+                <div class="w-3 h-3 rounded-full bg-red-500 border border-red-600"></div>
+                <div class="w-3 h-3 rounded-full bg-yellow-500 border border-yellow-600"></div>
+                <div class="w-3 h-3 rounded-full bg-green-500 border border-green-600"></div>
+            </div>
+            <div class="text-sm md:text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                <i data-lucide="shield" class="w-4 h-4 md:w-3.5 md:h-3.5 text-blue-600"></i>
+                <span>Squad Equalizer</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button @click="driveModal.show = true" class="text-xs px-2.5 py-1 rounded-lg border font-medium flex items-center gap-1.5 transition" :class="drive.connected ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50'">
+                    <span class="w-2 h-2 rounded-full" :class="drive.syncing ? 'bg-amber-400 animate-ping' : (drive.connected ? 'bg-emerald-500' : 'bg-slate-400')"></span>
+                    <span>{{ drive.syncing ? 'Syncing...' : (drive.connected ? 'Drive Synced' : '☁️ Connect Drive') }}</span>
+                </button>
+                <button @click="showMobileRoster = !showMobileRoster" class="md:hidden text-xs px-2.5 py-1 rounded-lg bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 font-medium text-slate-700 dark:text-slate-200">
+                    {{ showMobileRoster ? '✕ Close Roster' : `👥 Roster (${players.length})` }}
+                </button>
+                <button @click="toggleDarkMode" class="text-xs p-1.5 rounded hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300">
+                    <span v-if="isDark">☀️</span>
+                    <span v-else>🌙</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- App Layout -->
+        <div class="flex-1 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
+            
+            <!-- Sidebar / Settings & Database -->
+            <div :class="showMobileRoster ? 'flex' : 'hidden md:flex'" class="w-full md:w-80 border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex-col p-4 overflow-y-auto max-h-[75vh] md:max-h-none">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="font-bold text-sm uppercase tracking-wider text-slate-500 dark:text-slate-400">Player Roster ({{ players.length }})</h2>
+                    <button @click="resetToDefault" class="text-xs text-blue-600 hover:underline">Reset Defaults</button>
+                </div>
+
+                <!-- Add New Player Form -->
+                <form @submit.prevent="addSinglePlayer" class="mb-4 flex flex-col gap-2 bg-white dark:bg-slate-800/60 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                    <div class="flex gap-1.5">
+                        <input v-model="newPlayerName" placeholder="Player name..." class="flex-1 min-w-0 px-2.5 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <input v-model="newPlayerNickname" placeholder="Nickname..." class="w-24 px-2 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <div class="flex-1 flex items-center justify-between bg-slate-50 dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <span class="text-[10px] font-bold text-rose-500">ATK</span>
+                            <input v-model.number="newPlayerAttack" type="number" min="1" max="10" class="w-8 text-xs text-center bg-transparent font-bold focus:outline-none">
+                        </div>
+                        <div class="flex-1 flex items-center justify-between bg-slate-50 dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <span class="text-[10px] font-bold text-sky-500">DEF</span>
+                            <input v-model.number="newPlayerDefence" type="number" min="1" max="10" class="w-8 text-xs text-center bg-transparent font-bold focus:outline-none">
+                        </div>
+                        <div class="flex-1 flex items-center justify-between bg-slate-50 dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <span class="text-[10px] font-bold text-emerald-500">FIT</span>
+                            <input v-model.number="newPlayerFitness" type="number" min="1" max="10" class="w-8 text-xs text-center bg-transparent font-bold focus:outline-none">
+                        </div>
+                        <button type="submit" class="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm">Add</button>
+                    </div>
+                </form>
+
+                <!-- Search Roster -->
+                <input v-model="searchQuery" placeholder="Search database..." class="mb-3 px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700">
+
+                <!-- Player Roster List -->
+                <div class="flex-1 overflow-y-auto space-y-2 pr-1">
+                    <div v-for="player in filteredPlayers" :key="player.name" class="p-2.5 bg-white dark:bg-slate-800/80 rounded-lg border border-slate-200/60 dark:border-slate-700/50 shadow-sm hover:border-slate-300 flex flex-col gap-2">
+                        <div class="flex justify-between items-center gap-1">
+                            <span class="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{{ player.name }}</span>
+                            <div class="flex items-center gap-1.5 shrink-0">
+                                <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 font-bold" title="Total Rating">
+                                    {{ getPlayerTotal(player) }}/30
+                                </span>
+                                <button @click="removePlayer(player.name)" class="text-slate-400 hover:text-red-500 text-xs px-1">✕</button>
+                            </div>
+                        </div>
+                        <!-- Attack / Defence / Fitness Inputs -->
+                        <div class="grid grid-cols-3 gap-1.5">
+                            <div class="flex items-center justify-between px-1.5 py-0.5 rounded bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200/60 dark:border-rose-800/40">
+                                <span class="text-[10px] font-bold text-rose-600 dark:text-rose-400">ATK</span>
+                                <input v-model.number="player.attack" @change="saveToStorage" type="number" min="1" max="10" class="w-8 text-xs text-right bg-transparent font-bold text-slate-700 dark:text-slate-200 focus:outline-none">
+                            </div>
+                            <div class="flex items-center justify-between px-1.5 py-0.5 rounded bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/60 dark:border-sky-800/40">
+                                <span class="text-[10px] font-bold text-sky-600 dark:text-sky-400">DEF</span>
+                                <input v-model.number="player.defence" @change="saveToStorage" type="number" min="1" max="10" class="w-8 text-xs text-right bg-transparent font-bold text-slate-700 dark:text-slate-200 focus:outline-none">
+                            </div>
+                            <div class="flex items-center justify-between px-1.5 py-0.5 rounded bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40">
+                                <span class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">FIT</span>
+                                <input v-model.number="player.fitness" @change="saveToStorage" type="number" min="1" max="10" class="w-8 text-xs text-right bg-transparent font-bold text-slate-700 dark:text-slate-200 focus:outline-none">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[10px] text-slate-400 font-medium">AKA:</span>
+                            <input v-model="player.nickname" @change="saveToStorage" placeholder="Add nickname..." class="flex-1 px-2 py-0.5 text-[11px] rounded bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Input & Team View -->
+            <div class="flex-1 flex flex-col p-6 overflow-y-auto space-y-6">
+                
+                <!-- Match List Input Box -->
+                <div class="space-y-2">
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-semibold text-slate-700 dark:text-slate-200">Paste Today's Player List</label>
+                        <span class="text-xs text-slate-400">First names, full names, nicknames, email addresses, or list format</span>
+                    </div>
+                    <textarea v-model="inputText" rows="5" placeholder="e.g.
+1. Jon Newton (GK)
+2. Adam Land
+3. Ish
+4. Gary Bateman" class="w-full p-3 text-xs font-mono rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner resize-none"></textarea>
+                    
+                    <div class="flex flex-wrap items-center justify-between gap-4">
+                        <div class="flex items-center space-x-3">
+                            <label class="text-xs font-medium text-slate-600 dark:text-slate-300">Number of Teams:</label>
+                            <select v-model.number="teamCount" class="px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-semibold focus:outline-none">
+                                <option :value="2">2 Teams (Red vs Yellow)</option>
+                                <option :value="3">3 Teams</option>
+                                <option :value="4">4 Teams</option>
+                            </select>
+                        </div>
+
+                        <button @click="processAndBalance" class="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-semibold text-xs rounded-xl shadow-lg transition transform active:scale-95 flex items-center gap-2">
+                            <span>⚡ Generate Balanced Squads</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Teams Display -->
+                <div v-if="teams.length > 0" class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-base font-bold text-slate-800 dark:text-slate-100">Generated Balanced Teams</h3>
+                        <button @click="copyTeamsText" class="px-3 py-1.5 text-xs bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg text-slate-700 dark:text-slate-200 font-medium transition flex items-center gap-1">
+                            📋 Copy Teams List
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div v-for="(team, index) in teams" :key="index" class="bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm flex flex-col">
+                            <div class="flex justify-between items-start pb-2.5 mb-3 border-b border-slate-100 dark:border-slate-700">
+                                <div>
+                                    <span class="font-bold text-sm block" :class="getTeamTitleColor(index)">{{ getTeamName(index) }}</span>
+                                    <span class="text-[10px] text-slate-400">{{ team.length }} Players</span>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold px-2 py-0.5 rounded-full">Total: {{ getTeamStats(team).total }}</span>
+                                    <div class="flex items-center justify-end gap-1.5 mt-1 text-[10px] font-semibold">
+                                        <span class="text-rose-500">A:{{ getTeamStats(team).attack }}</span>
+                                        <span class="text-sky-500">D:{{ getTeamStats(team).defence }}</span>
+                                        <span class="text-emerald-500">F:{{ getTeamStats(team).fitness }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <ul class="space-y-2 flex-1">
+                                <li v-for="player in team" :key="player.name" class="flex justify-between items-center text-xs py-1 border-b border-slate-50 dark:border-slate-800/50 last:border-0">
+                                    <span class="font-medium text-slate-700 dark:text-slate-200">{{ formatDisplayName(player) }}</span>
+                                    <div class="flex items-center gap-1.5 text-[10px] font-semibold">
+                                        <span class="px-1.5 py-0.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400" title="Attack">{{ player.attack }}</span>
+                                        <span class="px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400" title="Defence">{{ player.defence }}</span>
+                                        <span class="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400" title="Fitness">{{ player.fitness }}</span>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Modal: Disambiguation / Select Player -->
+        <div v-if="disambiguationModal.show" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+                <h3 class="text-base font-bold text-slate-800 dark:text-slate-100 mb-2">Multiple Matches Found</h3>
+                <p class="text-xs text-slate-600 dark:text-slate-400 mb-4">
+                    The input "<span class="font-semibold text-blue-500">{{ disambiguationModal.inputName }}</span>" matches multiple registered players. Which player did you mean?
+                </p>
+                <div class="space-y-2 mb-4 max-h-48 overflow-y-auto">
+                    <button v-for="candidate in disambiguationModal.candidates" :key="candidate.name" @click="resolveDisambiguation(candidate)" class="w-full text-left p-3 rounded-xl bg-slate-100 dark:bg-slate-700/60 hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-slate-200 dark:border-slate-600 flex justify-between items-center transition">
+                        <span class="text-xs font-semibold">{{ candidate.name }}</span>
+                        <span class="text-[11px] text-slate-400">A:{{ candidate.attack }} D:{{ candidate.defence }} F:{{ candidate.fitness }}</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Rating Unregistered Players -->
+        <div v-if="unknownPlayersModal.show" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+                <div class="flex items-center space-x-2 text-amber-500">
+                    <h3 class="text-base font-bold text-slate-800 dark:text-slate-100">Unrecognized Players Detected</h3>
+                </div>
+                <p class="text-xs text-slate-600 dark:text-slate-400">
+                    Please provide Attack, Defence, and Fitness ratings (1–10) for these new players to save them and balance the squads:
+                </p>
+                <div class="space-y-3 max-h-64 overflow-y-auto pr-1">
+                    <div v-for="item in unknownPlayersModal.list" :key="item.name" class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 dark:bg-slate-700/50 p-3 rounded-xl border border-slate-200/60 dark:border-slate-600/50">
+                        <span class="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">{{ item.name }}</span>
+                        <div class="flex items-center gap-2">
+                            <div class="flex items-center gap-1 bg-white dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600">
+                                <span class="text-[10px] font-bold text-rose-500">ATK</span>
+                                <input v-model.number="item.attack" type="number" min="1" max="10" class="w-9 text-xs text-center font-bold bg-transparent focus:outline-none">
+                            </div>
+                            <div class="flex items-center gap-1 bg-white dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600">
+                                <span class="text-[10px] font-bold text-sky-500">DEF</span>
+                                <input v-model.number="item.defence" type="number" min="1" max="10" class="w-9 text-xs text-center font-bold bg-transparent focus:outline-none">
+                            </div>
+                            <div class="flex items-center gap-1 bg-white dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600">
+                                <span class="text-[10px] font-bold text-emerald-500">FIT</span>
+                                <input v-model.number="item.fitness" type="number" min="1" max="10" class="w-9 text-xs text-center font-bold bg-transparent focus:outline-none">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button @click="submitUnknownRatings" class="px-5 py-2 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-md">
+                        Save & Generate Teams
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Google Drive Cloud Sync Settings -->
+        <div v-if="driveModal.show" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center border-b border-slate-200 dark:border-slate-700 pb-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg">☁️</span>
+                        <h3 class="text-base font-bold text-slate-800 dark:text-slate-100">Google Drive Shared Storage</h3>
+                    </div>
+                    <button @click="driveModal.show = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-sm font-bold px-2">✕</button>
+                </div>
+
+                <p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                    Connect your Google Drive to save <code class="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 font-mono text-[11px]">squad_equalizer_roster.json</code> in the cloud. Every change you make automatically syncs across your Mac, phone, and teammates.
+                </p>
+
+                <!-- Step 1: OAuth Client ID -->
+                <div class="space-y-1.5">
+                    <label class="text-xs font-semibold text-slate-700 dark:text-slate-200 block">1. Google OAuth Client ID</label>
+                    <input v-model="drive.clientId" @change="saveDriveConfig" placeholder="e.g. 123456789-abcdef.apps.googleusercontent.com" class="w-full px-3 py-2 text-xs font-mono rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <!-- Step 2: Optional Shared File ID -->
+                <div class="space-y-1.5">
+                    <label class="text-xs font-semibold text-slate-700 dark:text-slate-200 block">2. Shared Drive File ID <span class="font-normal text-slate-400">(auto-filled when you sign in, or paste a shared ID)</span></label>
+                    <input v-model="drive.fileId" @change="saveDriveConfig" placeholder="Auto-generated on first sign-in..." class="w-full px-3 py-2 text-xs font-mono rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <!-- Connection Status & Actions -->
+                <div class="bg-slate-50 dark:bg-slate-900/70 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                    <div class="flex items-center justify-between text-xs">
+                        <span class="text-slate-500 dark:text-slate-400">Status:</span>
+                        <span class="font-semibold" :class="drive.connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300'">
+                            {{ drive.connected ? `Connected (${drive.lastSynced || 'Up to date'})` : 'Not Connected' }}
+                        </span>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                        <button @click="connectGoogleDrive" class="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm transition">
+                            {{ drive.connected ? '🔄 Refresh & Pull Latest' : '🔑 Sign in with Google Drive' }}
+                        </button>
+                        <button v-if="drive.connected" @click="pushToGoogleDrive" class="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-sm transition">
+                            ⬆️ Force Save
+                        </button>
+                        <button v-if="drive.connected" @click="disconnectGoogleDrive" class="py-2 px-3 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition">
+                            Disconnect
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Teammate Share Link -->
+                <div v-if="drive.clientId && drive.fileId" class="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 space-y-2">
+                    <div class="text-xs font-semibold text-blue-800 dark:text-blue-300">Share with Your Phone or Teammates</div>
+                    <p class="text-[11px] text-blue-700/80 dark:text-blue-300/80">
+                        In Google Drive, share <code class="font-mono">squad_equalizer_roster.json</code> with your mates (as <strong>Editor</strong>), then send them this link so their app automatically connects to the same roster:
+                    </p>
+                    <button @click="copyShareLink" class="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+                        🔗 Copy Teammate Share Link
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notification -->
+        <div v-if="toast.show" class="fixed bottom-6 right-6 px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-medium rounded-xl shadow-xl transition-all z-50">
+            {{ toast.message }}
+        </div>
+
+    </div>
+
+    <script>
+        const initialDefaultPlayers = [
+            { name: "Jon Newton", attack: 8, defence: 8, fitness: 8, nickname: "" },
+            { name: "Adam Land", attack: 4, defence: 4, fitness: 4, nickname: "" },
+            { name: "Naseer Rupani", attack: 5, defence: 5, fitness: 5, nickname: "Nas" },
+            { name: "Tom Ambrose", attack: 6, defence: 6, fitness: 6, nickname: "" },
+            { name: "Amir Rupani", attack: 7, defence: 7, fitness: 7, nickname: "" },
+            { name: "Ronan Duff", attack: 7, defence: 7, fitness: 7, nickname: "" },
+            { name: "Gary Bateman", attack: 7, defence: 7, fitness: 7, nickname: "" },
+            { name: "John Marriott", attack: 3, defence: 3, fitness: 3, nickname: "" },
+            { name: "Malik Aldeiri", attack: 5, defence: 5, fitness: 5, nickname: "" },
+            { name: "Dáithí Morgan", attack: 6, defence: 6, fitness: 6, nickname: "" },
+            { name: "Gregory Gardiner", attack: 8, defence: 8, fitness: 8, nickname: "Greg" },
+            { name: "Jason Christou", attack: 6, defence: 6, fitness: 6, nickname: "" },
+            { name: "Philip Smith", attack: 4, defence: 4, fitness: 4, nickname: "" },
+            { name: "Hassan Ish", attack: 9, defence: 9, fitness: 9, nickname: "Ish" },
+            { name: "Tahir Hussain", attack: 6, defence: 6, fitness: 6, nickname: "" },
+            { name: "Adil", attack: 6, defence: 6, fitness: 6, nickname: "" },
+            { name: "Mohammed Altaf", attack: 7, defence: 7, fitness: 7, nickname: "" },
+            { name: "Steven Fitzwilliam", attack: 6, defence: 6, fitness: 6, nickname: "" },
+            { name: "Rishi Athwal", attack: 9, defence: 9, fitness: 9, nickname: "" },
+            { name: "Pardeep Bhatti", attack: 6, defence: 6, fitness: 6, nickname: "Pard" },
+            { name: "Alex Quinn", attack: 6, defence: 6, fitness: 6, nickname: "" },
+            { name: "Ned P", attack: 7, defence: 7, fitness: 7, nickname: "" },
+            { name: "James Knox-Hope", attack: 6, defence: 6, fitness: 6, nickname: "" },
+            { name: "Jason Evans", attack: 9, defence: 9, fitness: 9, nickname: "" },
+            { name: "Danny Idriss", attack: 7, defence: 7, fitness: 7, nickname: "" },
+            { name: "Michael Oliver", attack: 9, defence: 9, fitness: 9, nickname: "" },
+            { name: "Richard Jones", attack: 8, defence: 8, fitness: 8, nickname: "" },
+            { name: "Felixtigerray F", attack: 7, defence: 7, fitness: 7, nickname: "" }
+        ];
+
+        const initialAliases = {
+            "ish": "Hassan Ish",
+            "hassan": "Hassan Ish",
+            "pard": "Pardeep Bhatti",
+            "pardeep": "Pardeep Bhatti",
+            "greg": "Gregory Gardiner",
+            "gregory": "Gregory Gardiner",
+            "nas": "Naseer Rupani",
+            "naseer": "Naseer Rupani"
+        };
+
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    players: [],
+                    aliases: {},
+                    searchQuery: '',
+                    inputText: '',
+                    teamCount: 2,
+                    teams: [],
+                    lastInputSignature: '',
+                    lastResolvedPool: [],
+                    generationSeed: 0,
+                    newPlayerName: '',
+                    newPlayerNickname: '',
+                    newPlayerAttack: 6,
+                    newPlayerDefence: 6,
+                    newPlayerFitness: 6,
+                    isDark: false,
+                    showMobileRoster: false,
+                    toast: { show: false, message: '' },
+                    disambiguationModal: { show: false, inputName: '', candidates: [], remainingItems: [], resolvedList: [] },
+                    unknownPlayersModal: { show: false, list: [], resolvedList: [] },
+                    driveModal: { show: false },
+                    drive: {
+                        clientId: '',
+                        fileId: '',
+                        accessToken: '',
+                        connected: false,
+                        syncing: false,
+                        lastSynced: '',
+                        syncTimer: null
+                    }
+                };
+            },
+            computed: {
+                filteredPlayers() {
+                    if (!this.searchQuery) return this.players;
+                    const q = this.searchQuery.toLowerCase();
+                    return this.players.filter(p => 
+                        p.name.toLowerCase().includes(q) || 
+                        (p.nickname && p.nickname.toLowerCase().includes(q))
+                    );
+                }
+            },
+            mounted() {
+                const saved = localStorage.getItem('squad_balancer_players');
+                if (saved) {
+                    try { 
+                        const parsed = JSON.parse(saved);
+                        // Migrate legacy single-rating players smoothly to 3-point system
+                        this.players = parsed.map(p => {
+                            const fallback = Number(p.rating) || 6;
+                            return {
+                                name: p.name,
+                                nickname: p.nickname || '',
+                                attack: p.attack !== undefined ? Number(p.attack) : fallback,
+                                defence: p.defence !== undefined ? Number(p.defence) : fallback,
+                                fitness: p.fitness !== undefined ? Number(p.fitness) : fallback
+                            };
+                        });
+                    } catch (e) { 
+                        this.players = JSON.parse(JSON.stringify(initialDefaultPlayers)); 
+                    }
+                } else {
+                    this.players = JSON.parse(JSON.stringify(initialDefaultPlayers));
+                }
+
+                const savedAliases = localStorage.getItem('squad_balancer_aliases');
+                if (savedAliases) {
+                    try { this.aliases = JSON.parse(savedAliases); } catch (e) { this.aliases = { ...initialAliases }; }
+                } else {
+                    this.aliases = { ...initialAliases };
+                }
+
+                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    this.isDark = true;
+                    document.documentElement.classList.add('dark');
+                }
+
+                // Load saved Google Drive configuration or URL share parameters
+                const params = new URLSearchParams(window.location.search);
+                const sharedClient = params.get('cid');
+                const sharedFile = params.get('fid');
+                const savedDrive = localStorage.getItem('squad_balancer_drive_cfg');
+                if (savedDrive) {
+                    try {
+                        const cfg = JSON.parse(savedDrive);
+                        this.drive.clientId = cfg.clientId || '';
+                        this.drive.fileId = cfg.fileId || '';
+                    } catch (e) {}
+                }
+                if (sharedClient) this.drive.clientId = sharedClient;
+                if (sharedFile) this.drive.fileId = sharedFile;
+                if (sharedClient || sharedFile) this.saveDriveConfig();
+
+                if (window.lucide) {
+                    lucide.createIcons();
+                }
+            },
+            methods: {
+                toggleDarkMode() {
+                    this.isDark = !this.isDark;
+                    if (this.isDark) {
+                        document.documentElement.classList.add('dark');
+                    } else {
+                        document.documentElement.classList.remove('dark');
+                    }
+                },
+                showToast(msg) {
+                    this.toast.message = msg;
+                    this.toast.show = true;
+                    setTimeout(() => { this.toast.show = false; }, 3000);
+                },
+                saveToStorage() {
+                    localStorage.setItem('squad_balancer_players', JSON.stringify(this.players));
+                    localStorage.setItem('squad_balancer_aliases', JSON.stringify(this.aliases));
+                    if (this.drive.connected && this.drive.accessToken) {
+                        clearTimeout(this.drive.syncTimer);
+                        this.drive.syncTimer = setTimeout(() => {
+                            this.pushToGoogleDrive(true);
+                        }, 1000);
+                    }
+                },
+                saveDriveConfig() {
+                    localStorage.setItem('squad_balancer_drive_cfg', JSON.stringify({
+                        clientId: this.drive.clientId.trim(),
+                        fileId: this.drive.fileId.trim()
+                    }));
+                },
+                connectGoogleDrive() {
+                    const clientId = this.drive.clientId.trim();
+                    if (!clientId) {
+                        this.showToast('Please paste your Google OAuth Client ID first');
+                        return;
+                    }
+                    if (!window.google || !google.accounts || !google.accounts.oauth2) {
+                        this.showToast('Google Sign-In library still loading, try again in a second');
+                        return;
+                    }
+                    this.saveDriveConfig();
+                    const tokenClient = google.accounts.oauth2.initTokenClient({
+                        client_id: clientId,
+                        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive',
+                        callback: async (tokenResponse) => {
+                            if (tokenResponse && tokenResponse.access_token) {
+                                this.drive.accessToken = tokenResponse.access_token;
+                                this.drive.connected = true;
+                                await this.syncWithGoogleDrive();
+                            } else {
+                                this.showToast('Google sign-in was cancelled or failed');
+                            }
+                        }
+                    });
+                    tokenClient.requestAccessToken({ prompt: this.drive.connected ? '' : 'consent' });
+                },
+                disconnectGoogleDrive() {
+                    this.drive.accessToken = '';
+                    this.drive.connected = false;
+                    this.drive.lastSynced = '';
+                    this.showToast('Disconnected from Google Drive');
+                },
+                async syncWithGoogleDrive() {
+                    this.drive.syncing = true;
+                    try {
+                        const headers = { Authorization: `Bearer ${this.drive.accessToken}` };
+                        let fileId = this.drive.fileId.trim();
+
+                        // If no fileId saved yet, search Drive for existing squad_equalizer_roster.json
+                        if (!fileId) {
+                            const query = encodeURIComponent("name = 'squad_equalizer_roster.json' and trashed = false");
+                            const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime)`, { headers });
+                            const searchData = await searchRes.json();
+                            if (searchData.files && searchData.files.length > 0) {
+                                fileId = searchData.files[0].id;
+                                this.drive.fileId = fileId;
+                                this.saveDriveConfig();
+                            }
+                        }
+
+                        if (fileId) {
+                            // Download existing roster JSON from Google Drive
+                            const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers });
+                            if (fileRes.ok) {
+                                const cloudData = await fileRes.json();
+                                if (cloudData && Array.isArray(cloudData.players) && cloudData.players.length > 0) {
+                                    this.players = cloudData.players;
+                                    if (cloudData.aliases) this.aliases = cloudData.aliases;
+                                    localStorage.setItem('squad_balancer_players', JSON.stringify(this.players));
+                                    localStorage.setItem('squad_balancer_aliases', JSON.stringify(this.aliases));
+                                    this.drive.lastSynced = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                    this.showToast('Synced latest roster from Google Drive!');
+                                } else {
+                                    await this.pushToGoogleDrive(true);
+                                }
+                            } else {
+                                // File ID inaccessible or deleted -> create a fresh file
+                                this.drive.fileId = '';
+                                await this.createDriveRosterFile();
+                            }
+                        } else {
+                            await this.createDriveRosterFile();
+                        }
+                    } catch (err) {
+                        this.showToast('Error syncing with Google Drive');
+                    } finally {
+                        this.drive.syncing = false;
+                    }
+                },
+                async createDriveRosterFile() {
+                    const metadata = {
+                        name: 'squad_equalizer_roster.json',
+                        mimeType: 'application/json'
+                    };
+                    const payload = JSON.stringify({
+                        updatedAt: new Date().toISOString(),
+                        players: this.players,
+                        aliases: this.aliases
+                    }, null, 2);
+
+                    const form = new FormData();
+                    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+                    form.append('file', new Blob([payload], { type: 'application/json' }));
+
+                    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${this.drive.accessToken}` },
+                        body: form
+                    });
+                    const data = await res.json();
+                    if (data && data.id) {
+                        this.drive.fileId = data.id;
+                        this.saveDriveConfig();
+                        this.drive.lastSynced = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        this.showToast('Created squad_equalizer_roster.json in Google Drive!');
+                    }
+                },
+                async pushToGoogleDrive(silent = false) {
+                    if (!this.drive.connected || !this.drive.accessToken) return;
+                    if (!this.drive.fileId) {
+                        await this.createDriveRosterFile();
+                        return;
+                    }
+                    this.drive.syncing = true;
+                    try {
+                        const payload = JSON.stringify({
+                            updatedAt: new Date().toISOString(),
+                            players: this.players,
+                            aliases: this.aliases
+                        }, null, 2);
+
+                        const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${this.drive.fileId}?uploadType=media`, {
+                            method: 'PATCH',
+                            headers: {
+                                Authorization: `Bearer ${this.drive.accessToken}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: payload
+                        });
+                        if (res.ok) {
+                            this.drive.lastSynced = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            if (!silent) this.showToast('Roster saved to Google Drive!');
+                        }
+                    } catch (err) {
+                        if (!silent) this.showToast('Failed to save to Google Drive');
+                    } finally {
+                        this.drive.syncing = false;
+                    }
+                },
+                copyShareLink() {
+                    const baseUrl = window.location.origin + window.location.pathname;
+                    const shareUrl = `${baseUrl}?cid=${encodeURIComponent(this.drive.clientId.trim())}&fid=${encodeURIComponent(this.drive.fileId.trim())}`;
+                    const textarea = document.createElement('textarea');
+                    textarea.value = shareUrl;
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    try {
+                        document.execCommand('copy');
+                        this.showToast('Teammate share link copied!');
+                    } catch (err) {
+                        this.showToast('Failed to copy link');
+                    }
+                    document.body.removeChild(textarea);
+                },
+                resetToDefault() {
+                    this.players = JSON.parse(JSON.stringify(initialDefaultPlayers));
+                    this.aliases = { ...initialAliases };
+                    this.saveToStorage();
+                    this.showToast('Roster & aliases reset to defaults');
+                },
+                addSinglePlayer() {
+                    if (!this.newPlayerName.trim()) return;
+                    const name = this.cleanRawName(this.newPlayerName);
+                    const nickname = this.newPlayerNickname.trim();
+                    const attack = Number(this.newPlayerAttack) || 6;
+                    const defence = Number(this.newPlayerDefence) || 6;
+                    const fitness = Number(this.newPlayerFitness) || 6;
+                    
+                    const existing = this.players.find(p => p.name.toLowerCase() === name.toLowerCase());
+                    if (existing) {
+                        existing.attack = attack;
+                        existing.defence = defence;
+                        existing.fitness = fitness;
+                        if (nickname) existing.nickname = nickname;
+                    } else {
+                        this.players.push({ name, attack, defence, fitness, nickname });
+                    }
+
+                    if (nickname) {
+                        this.aliases[nickname.toLowerCase()] = name;
+                    }
+
+                    this.saveToStorage();
+                    this.newPlayerName = '';
+                    this.newPlayerNickname = '';
+                    this.showToast('Player added to roster');
+                },
+                removePlayer(name) {
+                    this.players = this.players.filter(p => p.name !== name);
+                    this.saveToStorage();
+                },
+                cleanRawName(raw) {
+                    let s = raw.trim();
+                    // Remove email brackets <...>
+                    s = s.replace(/<[^>]+>/g, '').trim();
+                    // Remove leading list numbers or bullets (e.g., "1. ", "- ", "* ")
+                    s = s.replace(/^[\d]+[\.\)\-\s]+/, '').replace(/^[\-\*\•]\s+/, '').trim();
+                    // Remove parenthetical or bracketed annotations e.g., "(bibs)", "[GK]", "(c)"
+                    s = s.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
+                    // Remove trailing notes after dashes/colons if extra metadata (e.g., " - bibs", " : paid")
+                    s = s.replace(/\s+[\-\–\—\:]\s+(bibs?|gk|paid|sub|in|out|captain|c)$/i, '').trim();
+                    return s;
+                },
+                parseInputNames(text) {
+                    const lines = text.split(/[\n,]+/);
+                    const cleaned = [];
+                    for (let line of lines) {
+                        const name = this.cleanRawName(line);
+                        if (name && name.length > 0) {
+                            cleaned.push(name);
+                        }
+                    }
+                    return cleaned;
+                },
+                processAndBalance() {
+                    const rawNames = this.parseInputNames(this.inputText);
+                    if (rawNames.length < 2) {
+                        this.showToast('Please enter at least 2 players');
+                        return;
+                    }
+
+                    const currentSignature = `${this.teamCount}::${rawNames.join('|').toLowerCase()}`;
+                    if (currentSignature === this.lastInputSignature && this.lastResolvedPool.length === rawNames.length && this.teams.length > 0) {
+                        this.generationSeed++;
+                        this.balanceSquads(this.lastResolvedPool, true);
+                        return;
+                    }
+
+                    this.lastInputSignature = currentSignature;
+                    this.generationSeed = 0;
+
+                    const queue = [...rawNames];
+                    const resolved = [];
+                    const unknown = [];
+
+                    this.resolveInputList(queue, resolved, unknown);
+                },
+                resolveInputList(queue, resolved, unknown) {
+                    if (queue.length === 0) {
+                        if (unknown.length > 0) {
+                            this.unknownPlayersModal.list = unknown.map(u => ({
+                                name: u,
+                                attack: 6,
+                                defence: 6,
+                                fitness: 6
+                            }));
+                            this.unknownPlayersModal.resolvedList = resolved;
+                            this.unknownPlayersModal.show = true;
+                        } else {
+                            this.balanceSquads(resolved);
+                        }
+                        return;
+                    }
+
+                    const currentName = queue.shift();
+                    const lowerInput = currentName.toLowerCase();
+
+                    // 1. Check remembered aliases / nicknames map
+                    if (this.aliases[lowerInput]) {
+                        const mappedFullName = this.aliases[lowerInput];
+                        const playerObj = this.players.find(p => p.name.toLowerCase() === mappedFullName.toLowerCase());
+                        if (playerObj) {
+                            resolved.push(playerObj);
+                            return this.resolveInputList(queue, resolved, unknown);
+                        }
+                    }
+
+                    // 2. Exact match on full name or database nickname
+                    const exactMatch = this.players.find(p => 
+                        p.name.toLowerCase() === lowerInput || 
+                        (p.nickname && p.nickname.toLowerCase() === lowerInput)
+                    );
+                    if (exactMatch) {
+                        resolved.push(exactMatch);
+                        return this.resolveInputList(queue, resolved, unknown);
+                    }
+
+                    // 3. First name or first name + surname initial match (e.g. "Jason C" or "Jason")
+                    const parts = lowerInput.split(/\s+/);
+                    const firstPart = parts[0];
+                    const secondPart = parts.length > 1 ? parts[1].replace(/\./g, '') : '';
+
+                    const candidates = this.players.filter(p => {
+                        const pParts = p.name.toLowerCase().split(/\s+/);
+                        const pFirst = pParts[0];
+                        const pLast = pParts.length > 1 ? pParts[pParts.length - 1] : '';
+
+                        if (pFirst === firstPart) {
+                            if (!secondPart) return true;
+                            if (pLast.startsWith(secondPart)) return true;
+                        }
+                        return false;
+                    });
+
+                    if (candidates.length === 1) {
+                        // Remember shorthand mapping for next time if abbreviated
+                        if (lowerInput !== candidates[0].name.toLowerCase() && secondPart) {
+                            this.aliases[lowerInput] = candidates[0].name;
+                            this.saveToStorage();
+                        }
+                        resolved.push(candidates[0]);
+                        return this.resolveInputList(queue, resolved, unknown);
+                    } else if (candidates.length > 1) {
+                        // Trigger disambiguation modal
+                        this.disambiguationModal = {
+                            show: true,
+                            inputName: currentName,
+                            candidates,
+                            remainingItems: queue,
+                            resolvedList: resolved,
+                            unknownList: unknown
+                        };
+                        return;
+                    } else {
+                        // Unrecognized player
+                        if (!unknown.some(u => u.toLowerCase() === lowerInput)) {
+                            unknown.push(currentName);
+                        }
+                        return this.resolveInputList(queue, resolved, unknown);
+                    }
+                },
+                resolveDisambiguation(selectedPlayer) {
+                    const inputKey = this.disambiguationModal.inputName.toLowerCase();
+                    // Remember this choice permanently for future lists
+                    this.aliases[inputKey] = selectedPlayer.name;
+                    this.saveToStorage();
+
+                    const resolved = [...this.disambiguationModal.resolvedList, selectedPlayer];
+                    const queue = [...this.disambiguationModal.remainingItems];
+                    const unknown = [...(this.disambiguationModal.unknownList || [])];
+
+                    this.disambiguationModal.show = false;
+                    this.showToast(`Remembered "${this.disambiguationModal.inputName}" → ${selectedPlayer.name}`);
+                    this.resolveInputList(queue, resolved, unknown);
+                },
+                submitUnknownRatings() {
+                    for (let item of this.unknownPlayersModal.list) {
+                        const newP = {
+                            name: item.name,
+                            attack: Number(item.attack) || 6,
+                            defence: Number(item.defence) || 6,
+                            fitness: Number(item.fitness) || 6,
+                            nickname: ''
+                        };
+                        this.players.push(newP);
+                        this.unknownPlayersModal.resolvedList.push(newP);
+                    }
+                    this.saveToStorage();
+                    this.unknownPlayersModal.show = false;
+                    this.balanceSquads(this.unknownPlayersModal.resolvedList);
+                },
+                getPlayerTotal(player) {
+                    return (Number(player.attack) || 0) + (Number(player.defence) || 0) + (Number(player.fitness) || 0);
+                },
+                getTeamStats(team) {
+                    return team.reduce((acc, p) => {
+                        const atk = Number(p.attack) || 0;
+                        const def = Number(p.defence) || 0;
+                        const fit = Number(p.fitness) || 0;
+                        acc.attack += atk;
+                        acc.defence += def;
+                        acc.fitness += fit;
+                        acc.total += (atk + def + fit);
+                        return acc;
+                    }, { attack: 0, defence: 0, fitness: 0, total: 0 });
+                },
+                formatDisplayName(player) {
+                    // Always use nickname if present
+                    if (player.nickname && player.nickname.trim() !== '') {
+                        return player.nickname.trim();
+                    }
+
+                    const firstName = player.name.split(' ')[0];
+                    const allCurrentPlayers = this.teams.flat();
+                    const duplicateFirstNames = allCurrentPlayers.filter(p => p.name.split(' ')[0].toLowerCase() === firstName.toLowerCase());
+
+                    if (duplicateFirstNames.length > 1) {
+                        const nameParts = player.name.split(' ');
+                        if (nameParts.length > 1) {
+                            const surnameInitial = nameParts[nameParts.length - 1][0].toUpperCase();
+                            return `${firstName} ${surnameInitial}.`;
+                        }
+                    }
+
+                    return firstName;
+                },
+                evaluatePartitionCost(teams) {
+                    // Calculates imbalance across total points AND individual Attack, Defence, and Fitness attributes
+                    const stats = teams.map(t => this.getTeamStats(t));
+                    let cost = 0;
+
+                    for (let i = 0; i < stats.length; i++) {
+                        for (let j = i + 1; j < stats.length; j++) {
+                            const totalDiff = Math.abs(stats[i].total - stats[j].total);
+                            const atkDiff = Math.abs(stats[i].attack - stats[j].attack);
+                            const defDiff = Math.abs(stats[i].defence - stats[j].defence);
+                            const fitDiff = Math.abs(stats[i].fitness - stats[j].fitness);
+
+                            // Heavily penalize overall skill gap, then balance attack, defence, and fitness spreads
+                            cost += (totalDiff * 3.0) + (atkDiff * 1.5) + (defDiff * 1.5) + (fitDiff * 1.5);
+                        }
+                    }
+                    return cost;
+                },
+                balanceSquads(playerList, isAlternative = false) {
+                    this.lastResolvedPool = [...playerList];
+                    const k = this.teamCount;
+                    const n = playerList.length;
+
+                    if (n === 0) return;
+
+                    // Target roster sizes per team (differ by at most 1 player)
+                    const baseSize = Math.floor(n / k);
+                    const remainder = n % k;
+                    const targetSizes = Array.from({ length: k }, (_, i) => baseSize + (i < remainder ? 1 : 0));
+
+                    const previousSignature = this.teams.length > 0
+                        ? this.teams.map(t => t.map(p => p.name).sort().join(',')).sort().join('|')
+                        : '';
+
+                    let bestTeams = null;
+                    let bestCost = Infinity;
+
+                    // Run multi-start greedy + pairwise swap optimization to balance Total, Attack, Defence & Fitness
+                    const trials = isAlternative ? 120 : 180;
+
+                    for (let trial = 0; trial < trials; trial++) {
+                        // Sort players by total score descending with slight jitter for exploration
+                        const pool = [...playerList].sort((a, b) => {
+                            const diff = this.getPlayerTotal(b) - this.getPlayerTotal(a);
+                            if (trial === 0 && !isAlternative) return diff;
+                            return diff + (Math.random() - 0.5) * 4;
+                        });
+
+                        const candidateTeams = Array.from({ length: k }, () => []);
+
+                        // Greedy assignment: place each player onto the eligible team that minimizes current imbalance
+                        for (const player of pool) {
+                            let chosenIdx = -1;
+                            let lowestStepCost = Infinity;
+
+                            for (let tIdx = 0; tIdx < k; tIdx++) {
+                                if (candidateTeams[tIdx].length >= targetSizes[tIdx]) continue;
+                                candidateTeams[tIdx].push(player);
+                                const stepCost = this.evaluatePartitionCost(candidateTeams);
+                                candidateTeams[tIdx].pop();
+
+                                if (stepCost < lowestStepCost) {
+                                    lowestStepCost = stepCost;
+                                    chosenIdx = tIdx;
+                                }
+                            }
+                            candidateTeams[chosenIdx].push(player);
+                        }
+
+                        // Local search: test pairwise swaps between teams to refine ATK/DEF/FIT parity
+                        let improved = true;
+                        let guard = 0;
+                        while (improved && guard < 40) {
+                            improved = false;
+                            guard++;
+                            const currentCost = this.evaluatePartitionCost(candidateTeams);
+
+                            for (let t1 = 0; t1 < k; t1++) {
+                                for (let t2 = t1 + 1; t2 < k; t2++) {
+                                    for (let i = 0; i < candidateTeams[t1].length; i++) {
+                                        for (let j = 0; j < candidateTeams[t2].length; j++) {
+                                            const p1 = candidateTeams[t1][i];
+                                            const p2 = candidateTeams[t2][j];
+                                            candidateTeams[t1][i] = p2;
+                                            candidateTeams[t2][j] = p1;
+
+                                            const newCost = this.evaluatePartitionCost(candidateTeams);
+                                            if (newCost + 0.001 < currentCost) {
+                                                improved = true;
+                                            } else {
+                                                candidateTeams[t1][i] = p1;
+                                                candidateTeams[t2][j] = p2;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        const finalCost = this.evaluatePartitionCost(candidateTeams);
+                        const sig = candidateTeams.map(t => t.map(p => p.name).sort().join(',')).sort().join('|');
+
+                        // When generating alternatives, skip exact duplicate of the currently displayed lineup
+                        if (isAlternative && sig === previousSignature && trials - trial > 10) {
+                            continue;
+                        }
+
+                        if (finalCost < bestCost) {
+                            bestCost = finalCost;
+                            bestTeams = candidateTeams.map(t => [...t]);
+                        }
+                    }
+
+                    // Sort each team internally by highest total rating for clean presentation
+                    this.teams = (bestTeams || []).map(t =>
+                        t.sort((a, b) => this.getPlayerTotal(b) - this.getPlayerTotal(a))
+                    );
+
+                    if (isAlternative) {
+                        this.showToast(`Generated Alternative Team Setup (#${this.generationSeed + 1})`);
+                    } else {
+                        this.showToast('Squads balanced across Attack, Defence & Fitness!');
+                    }
+                },
+                getTeamName(index) {
+                    const names = ['RED TEAM', 'YELLOW TEAM', 'BLUE TEAM', 'GREEN TEAM'];
+                    return names[index] || `TEAM ${index + 1}`;
+                },
+                getTeamTitleColor(index) {
+                    const colors = [
+                        'text-red-600 dark:text-red-400',
+                        'text-amber-500 dark:text-amber-400',
+                        'text-blue-600 dark:text-blue-400',
+                        'text-emerald-600 dark:text-emerald-400'
+                    ];
+                    return colors[index] || 'text-slate-800 dark:text-slate-100';
+                },
+                copyTeamsText() {
+                    if (!this.teams || this.teams.length === 0) return;
+
+                    const lines = [];
+                    this.teams.forEach((team, idx) => {
+                        lines.push(this.getTeamName(idx));
+                        team.forEach(player => {
+                            lines.push(this.formatDisplayName(player));
+                        });
+                        if (idx < this.teams.length - 1) {
+                            lines.push('');
+                        }
+                    });
+
+                    const output = lines.join('\n');
+                    const textarea = document.createElement('textarea');
+                    textarea.value = output;
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    try {
+                        document.execCommand('copy');
+                        this.showToast('Teams copied to clipboard!');
+                    } catch (err) {
+                        this.showToast('Failed to copy teams');
+                    }
+                    document.body.removeChild(textarea);
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
