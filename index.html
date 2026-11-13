@@ -529,7 +529,7 @@
                     this.saveDriveConfig();
                     const tokenClient = google.accounts.oauth2.initTokenClient({
                         client_id: clientId,
-                        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive',
+                        scope: 'https://www.googleapis.com/auth/drive.file',
                         callback: async (tokenResponse) => {
                             if (tokenResponse && tokenResponse.access_token) {
                                 this.drive.accessToken = tokenResponse.access_token;
@@ -619,8 +619,27 @@
                     if (data && data.id) {
                         this.drive.fileId = data.id;
                         this.saveDriveConfig();
+                        await this.makeDriveFilePublic(data.id);
                         this.drive.lastSynced = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                        this.showToast('Created squad_equalizer_roster.json in Google Drive!');
+                        this.showToast('Created public squad_equalizer_roster.json in Google Drive!');
+                    }
+                },
+                async makeDriveFilePublic(fileId) {
+                    if (!fileId || !this.drive.accessToken) return;
+                    try {
+                        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+                            method: 'POST',
+                            headers: {
+                                Authorization: `Bearer ${this.drive.accessToken}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                role: 'writer',
+                                type: 'anyone'
+                            })
+                        });
+                    } catch (err) {
+                        console.warn('Could not set public file permissions automatically:', err);
                     }
                 },
                 async pushToGoogleDrive(silent = false) {
@@ -646,8 +665,9 @@
                             body: payload
                         });
                         if (res.ok) {
+                            await this.makeDriveFilePublic(this.drive.fileId);
                             this.drive.lastSynced = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            if (!silent) this.showToast('Roster saved to Google Drive!');
+                            if (!silent) this.showToast('Roster saved & shared publicly on Google Drive!');
                         }
                     } catch (err) {
                         if (!silent) this.showToast('Failed to save to Google Drive');
