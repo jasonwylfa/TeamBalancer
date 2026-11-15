@@ -300,6 +300,12 @@
                     <input v-model="drive.fileId" @change="saveDriveConfig" placeholder="Auto-generated on first sign-in..." class="w-full px-3 py-2 text-xs font-mono rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 </div>
 
+                <!-- Step 3: Optional Public Read API Key (Zero-Login for Teammates) -->
+                <div class="space-y-1.5">
+                    <label class="text-xs font-semibold text-slate-700 dark:text-slate-200 block">3. Public Read API Key <span class="font-normal text-slate-400">(optional — lets mates view roster with NO login)</span></label>
+                    <input v-model="drive.apiKey" @change="saveDriveConfig" placeholder="Paste Google Cloud API Key (optional)..." class="w-full px-3 py-2 text-xs font-mono rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
                 <!-- Connection Status & Actions -->
                 <div class="bg-slate-50 dark:bg-slate-900/70 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
                     <div class="flex items-center justify-between text-xs">
@@ -326,7 +332,7 @@
                 <div v-if="drive.clientId && drive.fileId" class="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50 space-y-2">
                     <div class="text-xs font-semibold text-blue-800 dark:text-blue-300">Share with Your Phone or Teammates</div>
                     <p class="text-[11px] text-blue-700/80 dark:text-blue-300/80">
-                        In Google Drive, share <code class="font-mono">squad_equalizer_roster.json</code> with your mates (as <strong>Editor</strong>), then send them this link so their app automatically connects to the same roster:
+                        {{ drive.apiKey ? 'With your API Key included, mates will load the latest roster automatically with ZERO Google login required!' : 'Add a Google API Key above for zero-login viewing, or share this link so mates can sign in and sync:' }}
                     </p>
                     <button @click="copyShareLink" class="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition">
                         🔗 Copy Teammate Share Link
@@ -413,6 +419,7 @@
                     drive: {
                         clientId: '76528887378-4p9vq28q2minqcio0g9vr7pudp82rhi8.apps.googleusercontent.com',
                         fileId: '',
+                        apiKey: '',
                         accessToken: '',
                         connected: false,
                         syncing: false,
@@ -470,17 +477,25 @@
                 const params = new URLSearchParams(window.location.search);
                 const sharedClient = params.get('cid');
                 const sharedFile = params.get('fid');
+                const sharedApiKey = params.get('key');
                 const savedDrive = localStorage.getItem('squad_balancer_drive_cfg');
                 if (savedDrive) {
                     try {
                         const cfg = JSON.parse(savedDrive);
                         this.drive.clientId = cfg.clientId || '';
                         this.drive.fileId = cfg.fileId || '';
+                        this.drive.apiKey = cfg.apiKey || '';
                     } catch (e) {}
                 }
                 if (sharedClient) this.drive.clientId = sharedClient;
                 if (sharedFile) this.drive.fileId = sharedFile;
-                if (sharedClient || sharedFile) this.saveDriveConfig();
+                if (sharedApiKey) this.drive.apiKey = sharedApiKey;
+                if (sharedClient || sharedFile || sharedApiKey) this.saveDriveConfig();
+
+                // Automatically fetch public roster without login if File ID + API Key are present
+                if (this.drive.fileId && this.drive.apiKey) {
+                    this.fetchPublicDriveRoster();
+                }
 
                 if (window.lucide) {
                     lucide.createIcons();
@@ -513,8 +528,33 @@
                 saveDriveConfig() {
                     localStorage.setItem('squad_balancer_drive_cfg', JSON.stringify({
                         clientId: this.drive.clientId.trim(),
-                        fileId: this.drive.fileId.trim()
+                        fileId: this.drive.fileId.trim(),
+                        apiKey: this.drive.apiKey.trim()
                     }));
+                },
+                async fetchPublicDriveRoster() {
+                    const fileId = this.drive.fileId.trim();
+                    const apiKey = this.drive.apiKey.trim();
+                    if (!fileId || !apiKey) return;
+                    this.drive.syncing = true;
+                    try {
+                        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&key=${encodeURIComponent(apiKey)}`);
+                        if (res.ok) {
+                            const cloudData = await res.json();
+                            if (cloudData && Array.isArray(cloudData.players) && cloudData.players.length > 0) {
+                                this.players = cloudData.players;
+                                if (cloudData.aliases) this.aliases = cloudData.aliases;
+                                localStorage.setItem('squad_balancer_players', JSON.stringify(this.players));
+                                localStorage.setItem('squad_balancer_aliases', JSON.stringify(this.aliases));
+                                this.drive.lastSynced = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                this.showToast('Loaded shared squad roster (no login needed)!');
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('Public Drive fetch failed:', err);
+                    } finally {
+                        this.drive.syncing = false;
+                    }
                 },
                 connectGoogleDrive() {
                     const clientId = this.drive.clientId.trim();
@@ -677,7 +717,10 @@
                 },
                 copyShareLink() {
                     const baseUrl = window.location.origin + window.location.pathname;
-                    const shareUrl = `${baseUrl}?cid=${encodeURIComponent(this.drive.clientId.trim())}&fid=${encodeURIComponent(this.drive.fileId.trim())}`;
+                    let shareUrl = `${baseUrl}?cid=${encodeURIComponent(this.drive.clientId.trim())}&fid=${encodeURIComponent(this.drive.fileId.trim())}`;
+                    if (this.drive.apiKey.trim()) {
+                        shareUrl += `&key=${encodeURIComponent(this.drive.apiKey.trim())}`;
+                    }
                     const textarea = document.createElement('textarea');
                     textarea.value = shareUrl;
                     textarea.style.position = 'fixed';
